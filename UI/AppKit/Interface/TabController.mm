@@ -11,6 +11,7 @@
 #include <LibWebView/ViewImplementation.h>
 
 #import <Application/ApplicationDelegate.h>
+#import <Carbon/Carbon.h>
 #import <Interface/Autocomplete.h>
 #import <Interface/LadybirdWebView.h>
 #import <Interface/Menu.h>
@@ -603,11 +604,11 @@ static NSInteger autocomplete_suggestion_index(NSString* suggestion_text, Vector
     m_is_applying_inline_autocomplete = false;
 }
 
-- (BOOL)navigateToLocation:(String)location
+- (BOOL)navigateToLocation:(String)location appendTLD:(WebView::AppendTLD)append_tld
 {
     m_autocomplete->cancel_pending_query();
 
-    if (auto url = WebView::sanitize_url(location, WebView::Application::settings().search_engine()); url.has_value()) {
+    if (auto url = WebView::sanitize_url(location, WebView::Application::settings().search_engine(), append_tld); url.has_value()) {
         [self loadURL:*url];
     } else {
         [[[self tab] web_view] view].load_navigation_error_page(location);
@@ -991,15 +992,31 @@ static NSInteger autocomplete_suggestion_index(NSString* suggestion_text, Vector
             return YES;
     }
 
-    if (selector != @selector(insertNewline:)) {
+    auto append_tld = WebView::AppendTLD::No;
+
+    if (selector == @selector(noop:)) {
+        auto* event = [[self tab] currentEvent];
+
+        if (!event || event.type != NSEventTypeKeyDown)
+            return NO;
+        if ((event.modifierFlags & NSEventModifierFlagCommand) == 0)
+            return NO;
+        if (event.keyCode != kVK_Return && event.keyCode != kVK_ANSI_KeypadEnter)
+            return NO;
+
+        append_tld = WebView::AppendTLD::Yes;
+    } else if (selector != @selector(insertNewline:)) {
         return NO;
     }
 
-    auto location = [self.autocomplete selectedSuggestion].value_or_lazy_evaluated([&]() {
-        return Ladybird::ns_string_to_string([[text_view textStorage] string]);
-    });
+    // Cmd+Return uses the raw location field query instead of the selected autocomplete suggestion.
+    auto location = (append_tld == WebView::AppendTLD::Yes)
+        ? Ladybird::ns_string_to_string([self currentLocationFieldQuery])
+        : [self.autocomplete selectedSuggestion].value_or_lazy_evaluated([&]() {
+              return Ladybird::ns_string_to_string([[text_view textStorage] string]);
+          });
 
-    [self navigateToLocation:move(location)];
+    [self navigateToLocation:move(location) appendTLD:append_tld];
     return YES;
 }
 
@@ -1053,7 +1070,7 @@ static NSInteger autocomplete_suggestion_index(NSString* suggestion_text, Vector
 
 - (void)onSelectedSuggestion:(String)suggestion
 {
-    [self navigateToLocation:move(suggestion)];
+    [self navigateToLocation:move(suggestion) appendTLD:WebView::AppendTLD::No];
 }
 
 @end
