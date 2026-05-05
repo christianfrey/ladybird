@@ -125,4 +125,14 @@ void* IOSurfaceHandle::core_foundation_pointer() const
     return m_ref_wrapper->ref;
 }
 
+void IOSurfaceHandle::lock_read_only() const
+{
+    IOSurfaceLock(m_ref_wrapper->ref, kIOSurfaceLockReadOnly, nullptr);
+}
+
+void IOSurfaceHandle::unlock_read_only() const
+{
+    IOSurfaceUnlock(m_ref_wrapper->ref, kIOSurfaceLockReadOnly, nullptr);
+}
+
 }

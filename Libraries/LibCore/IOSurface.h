@@ -32,6 +32,9 @@ public:
     size_t bytes_per_row() const;
     void* data() const;
 
+    void lock_read_only() const;
+    void unlock_read_only() const;
+
     void* core_foundation_pointer() const;
 
     ~IOSurfaceHandle();

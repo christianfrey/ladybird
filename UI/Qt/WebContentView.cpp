@@ -11,6 +11,7 @@
 #include <AK/Format.h>
 #include <AK/LexicalPath.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/ScopeGuard.h>
 #include <AK/Types.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/Resource.h>
@@ -20,6 +21,7 @@
 #include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/Palette.h>
 #include <LibGfx/Rect.h>
+#include <LibGfx/SharedImageBuffer.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibWeb/UIEvents/KeyCode.h>
 #include <LibWeb/UIEvents/MouseButton.h>
@@ -506,19 +508,28 @@ void WebContentView::paintEvent(QPaintEvent*)
     QPainter painter(this);
     painter.scale(1 / m_device_pixel_ratio, 1 / m_device_pixel_ratio);
 
-    Gfx::Bitmap const* bitmap = nullptr;
+    Gfx::SharedImageBuffer const* shared_image_buffer = nullptr;
     Gfx::IntSize bitmap_size;
 
     if (m_client_state.has_usable_bitmap) {
         VERIFY(m_client_state.front_bitmap.shared_image_buffer);
-        bitmap = m_client_state.front_bitmap.shared_image_buffer->bitmap().ptr();
+        shared_image_buffer = m_client_state.front_bitmap.shared_image_buffer.ptr();
         bitmap_size = m_client_state.front_bitmap.last_painted_size.to_type<int>();
     } else if (m_backup_shared_image_buffer) {
-        bitmap = m_backup_shared_image_buffer->bitmap().ptr();
+        shared_image_buffer = m_backup_shared_image_buffer.ptr();
         bitmap_size = m_backup_bitmap_size.to_type<int>();
     }
 
-    if (bitmap) {
+    if (shared_image_buffer) {
+        auto bitmap = shared_image_buffer->bitmap();
+#ifdef AK_OS_MACOS
+        // On systems with non-unified memory (Intel Macs), we must lock the IOSurface to ensure the CPU sees
+        // the latest GPU writes. Without this, the painter may see blank or incomplete frames.
+        shared_image_buffer->iosurface_handle().lock_read_only();
+        ScopeGuard unlock_iosurface = [&] {
+            shared_image_buffer->iosurface_handle().unlock_read_only();
+        };
+#endif
         QImage q_image(bitmap->scanline_u8(0), bitmap->width(), bitmap->height(), bitmap->pitch(), QImage::Format_RGB32);
         painter.drawImage(QPoint(0, 0), q_image, QRect(0, 0, bitmap_size.width(), bitmap_size.height()));
 
